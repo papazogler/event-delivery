@@ -94,7 +94,7 @@ func process(ctx context.Context) {
 		}
 		done := make(chan bool, 1)
 
-		fmt.Printf("processing event: %v\n", ue)
+		logger.Printf("Processing event: %v\n", ue)
 		messageQueue.Enqueue(m, done)
 		dispatcher.Dispatch(ue, done)
 	}
@@ -108,9 +108,9 @@ func commit(ctx context.Context) {
 			return
 		case m := <-processed:
 			if err := kafkaReader.CommitMessages(ctx, m); err != nil {
-				fmt.Printf("failed to commit messages: %v\n", err)
+				logger.Printf("Failed to commit messages: %v\n", err)
 			}
-			fmt.Printf("committed partition: %d at offset: %d\n", m.Partition, m.Offset)
+			logger.Printf("Committed partition: %d at offset: %d\n", m.Partition, m.Offset)
 		}
 	}
 }
