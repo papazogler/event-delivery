@@ -18,8 +18,13 @@ var kafkaURL, kafkaTopic, destination string
 var reliability int
 var kafkaReader *kafka.Reader
 var logger *log.Logger
-var messageQueue *WaitQueue
+var toCommit chan message
 var dispatcher *Dispatcher
+
+type message struct {
+	kafkaMsg   kafka.Message
+	dispatched <-chan bool
+}
 
 func init() {
 	flag.StringVar(&kafkaURL, "url", "localhost:9092", "URL to the kafka broker")
@@ -69,7 +74,7 @@ func main() {
 		cancelCtx()
 	}()
 
-	messageQueue = &WaitQueue{messages: make([]message, 0, 100), ctx: ctx}
+	toCommit = make(chan message, 100)
 	dispatcher = NewDispather(sender, logger)
 
 	go process(ctx)
@@ -95,22 +100,23 @@ func process(ctx context.Context) {
 		done := make(chan bool, 1)
 
 		logger.Printf("Processing event: %v\n", ue)
-		messageQueue.Enqueue(m, done)
+		toCommit <- message{m, done}
 		dispatcher.Dispatch(ue, done)
 	}
 }
 
 func commit(ctx context.Context) {
-	processed := messageQueue.Dequeue()
 	for {
 		select {
 		case <-ctx.Done():
+			close(toCommit)
 			return
-		case m := <-processed:
-			if err := kafkaReader.CommitMessages(ctx, m); err != nil {
+		case m := <-toCommit:
+			<-m.dispatched
+			if err := kafkaReader.CommitMessages(ctx, m.kafkaMsg); err != nil {
 				logger.Printf("Failed to commit messages: %v\n", err)
 			}
-			logger.Printf("Committed partition: %d at offset: %d\n", m.Partition, m.Offset)
+			logger.Printf("Committed partition: %d at offset: %d\n", m.kafkaMsg.Partition, m.kafkaMsg.Offset)
 		}
 	}
 }
